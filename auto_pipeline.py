@@ -334,45 +334,50 @@ def upload_to_youtube(video_path: Path, thumbnail_path: Path, streamer_name: str
         return None
 
 
-def process_live_streamer(streamer_info: dict):
-    """Executes capture, montage, thumbnails, and YouTube upload for a verified GTA 6 stream."""
+def process_live_streamer(streamer_info: dict, num_clips: int = 3):
+    """Executes capture, montage, thumbnails, and YouTube upload for a verified GTA 6 stream (num_clips times)."""
     name = streamer_info["name"]
     is_glitch = streamer_info["is_glitch"]
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    prefix = f"{streamer_info['id']}_{ts}"
 
-    raw_path = OUTPUT_DIR / f"{prefix}_raw.mp4"
-    overlay_path = OUTPUT_DIR / f"{prefix}_overlay.png"
-    ass_path = OUTPUT_DIR / f"{prefix}_subs.ass"
-    short_path = OUTPUT_DIR / f"{prefix}_short_1min.mp4"
-    thumb_path = OUTPUT_DIR / f"{prefix}_thumb_1280x720.jpg"
-    cover_path = OUTPUT_DIR / f"{prefix}_cover_1080x1920.jpg"
+    for clip_idx in range(1, num_clips + 1):
+        print(f"\n[*] Processing Clip {clip_idx}/{num_clips} for {name}...")
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        prefix = f"{streamer_info['id']}_{ts}_clip{clip_idx}"
 
-    # 1. Capture 60s stream
-    success = capture_stream(streamer_info["url"], 60, raw_path)
-    if not success:
-        return
+        raw_path = OUTPUT_DIR / f"{prefix}_raw.mp4"
+        overlay_path = OUTPUT_DIR / f"{prefix}_overlay.png"
+        ass_path = OUTPUT_DIR / f"{prefix}_subs.ass"
+        short_path = OUTPUT_DIR / f"{prefix}_short_1min.mp4"
+        thumb_path = OUTPUT_DIR / f"{prefix}_thumb_1280x720.jpg"
+        cover_path = OUTPUT_DIR / f"{prefix}_cover_1080x1920.jpg"
 
-    # 2. Build assets
-    create_dynamic_overlay(name, streamer_info["title"], is_glitch, overlay_path)
-    create_ass_subtitles(ass_path, name, is_glitch)
-    create_thumbnails(raw_path, name, is_glitch, thumb_path, cover_path)
+        # 1. Capture 60s stream
+        success = capture_stream(streamer_info["url"], 60, raw_path)
+        if not success:
+            print(f"[!] Could not capture clip {clip_idx}. Moving to next.")
+            continue
 
-    # 3. Montage 9:16 phone gameplay
-    montaged = montage_video(raw_path, overlay_path, ass_path, short_path)
-    overlay_path.unlink(missing_ok=True)
-    ass_path.unlink(missing_ok=True)
+        # 2. Build assets
+        create_dynamic_overlay(name, streamer_info["title"], is_glitch, overlay_path)
+        create_ass_subtitles(ass_path, name, is_glitch)
+        create_thumbnails(raw_path, name, is_glitch, thumb_path, cover_path)
 
-    if montaged:
-        print(f"\n[🎉] SHORT READY: {short_path.name}")
-        # 4. Upload to YouTube
-        upload_to_youtube(short_path, thumb_path, name, is_glitch)
+        # 3. Montage 9:16 phone gameplay
+        montaged = montage_video(raw_path, overlay_path, ass_path, short_path)
+        overlay_path.unlink(missing_ok=True)
+        ass_path.unlink(missing_ok=True)
+
+        if montaged:
+            print(f"\n[🎉] SHORT {clip_idx}/{num_clips} READY: {short_path.name}")
+            # 4. Upload to YouTube
+            upload_to_youtube(short_path, thumb_path, name, is_glitch)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Autonomous GTA 6 Stream Clipper & YouTube Publisher")
     parser.add_argument("--streamers", default="xqc,adinross,kaicenat,ishowspeed", help="Streamer IDs to monitor")
     parser.add_argument("--interval", default=600, type=int, help="Check interval in seconds (default: 600)")
+    parser.add_argument("--clips-per-stream", default=3, type=int, help="Number of clips to generate per live stream (default: 3)")
     parser.add_argument("--oneshot", action="store_true", help="Check once and exit")
     args = parser.parse_args()
 
@@ -381,13 +386,14 @@ def main():
     print(f"[*] Rule: ONLY clipping when playing GTA 6 / Grand Theft Auto VI.")
     print(f"[*] Framing: 9:16 Phone Center-Crop (Gameplay Only, No Facecam).")
     print(f"[*] Publishing Target: YouTube Shorts ONLY.")
+    print(f"[*] Target Clips per Stream: {args.clips_per_stream}")
 
     while True:
         for sid in active_ids:
             info = check_streamer(sid)
             if info.get("live"):
                 print(f"[🔥] {info['name']} IS LIVE PLAYING GTA 6! (Glitch mode: {info['is_glitch']})")
-                process_live_streamer(info)
+                process_live_streamer(info, num_clips=args.clips_per_stream)
             else:
                 pass
 
