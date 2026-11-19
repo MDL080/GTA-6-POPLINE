@@ -34,21 +34,25 @@ TARGET_STREAMERS = {
     "xqc": {
         "name": "xQc",
         "url": "https://kick.com/xqc",
+        "vods_url": "https://kick.com/xqc/videos",
         "platform": "Kick"
     },
     "adinross": {
         "name": "Adin Ross",
         "url": "https://kick.com/adinross",
+        "vods_url": "https://kick.com/adinross/videos",
         "platform": "Kick"
     },
     "kaicenat": {
         "name": "Kai Cenat",
         "url": "https://twitch.tv/kaicenat",
+        "vods_url": "https://twitch.tv/kaicenat/videos",
         "platform": "Twitch"
     },
     "ishowspeed": {
         "name": "IShowSpeed",
         "url": "https://www.youtube.com/@IShowSpeed/live",
+        "vods_url": "https://www.youtube.com/@IShowSpeed/streams",
         "platform": "YouTube"
     }
 }
@@ -72,7 +76,7 @@ def is_glitch_moment(title: str) -> bool:
 
 
 def check_streamer(streamer_id: str) -> dict:
-    """Inspects a streamer's live status, current game, and stream title."""
+    """Inspects a streamer's live status, current game, and stream title, including ongoing and recent broadcasts."""
     cfg = TARGET_STREAMERS.get(streamer_id)
     if not cfg:
         return {"live": False}
@@ -83,6 +87,7 @@ def check_streamer(streamer_id: str) -> dict:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if res.returncode == 0 and res.stdout.strip():
             data = json.loads(res.stdout.strip().splitlines()[-1])
+            # 1. Ongoing Live Broadcast (captures even if started hours ago)
             if data.get("is_live"):
                 title = data.get("fulltitle") or data.get("title") or ""
                 categories = data.get("categories") or []
@@ -103,7 +108,43 @@ def check_streamer(streamer_id: str) -> dict:
                     "platform": cfg["platform"]
                 }
     except Exception as e:
-        print(f"[!] Error checking {cfg['name']}: {e}")
+        print(f"[!] Error checking live for {cfg['name']}: {e}")
+
+    # 2. Recent Past Broadcast / VOD Fallback (if stream already concluded)
+    vod_url = cfg.get("vods_url")
+    if vod_url:
+        try:
+            vod_cmd = [YTDLP, "--impersonate", "chrome", "--playlist-items", "1", "--dump-json", vod_url]
+            vres = subprocess.run(vod_cmd, capture_output=True, text=True, timeout=30)
+            if vres.returncode == 0 and vres.stdout.strip():
+                vdata = json.loads(vres.stdout.strip().splitlines()[-1])
+                vtitle = vdata.get("fulltitle") or vdata.get("title") or ""
+                vcats = vdata.get("categories") or []
+                v_web_url = vdata.get("webpage_url") or vod_url
+                if is_gta6_content(vtitle, vcats):
+                    history_file = OUTPUT_DIR / "processed_vods.json"
+                    processed = []
+                    if history_file.exists():
+                        try:
+                            processed = json.loads(history_file.read_text(encoding="utf-8"))
+                        except Exception:
+                            pass
+                    vid_id = str(vdata.get("id") or vtitle)
+                    if vid_id not in processed:
+                        return {
+                            "live": True,
+                            "id": streamer_id,
+                            "name": cfg["name"],
+                            "title": vtitle,
+                            "is_glitch": is_glitch_moment(vtitle),
+                            "viewers": 0,
+                            "url": v_web_url,
+                            "platform": cfg["platform"],
+                            "is_vod": True,
+                            "vod_id": vid_id
+                        }
+        except Exception as e:
+            print(f"[!] Error checking past broadcasts for {cfg['name']}: {e}")
 
     return {"live": False}
 
@@ -371,6 +412,17 @@ def process_live_streamer(streamer_info: dict, num_clips: int = 3):
             print(f"\n[🎉] SHORT {clip_idx}/{num_clips} READY: {short_path.name}")
             # 4. Upload to YouTube
             upload_to_youtube(short_path, thumb_path, name, is_glitch)
+
+    if streamer_info.get("is_vod") and streamer_info.get("vod_id"):
+        history_file = OUTPUT_DIR / "processed_vods.json"
+        processed = []
+        if history_file.exists():
+            try:
+                processed = json.loads(history_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        processed.append(streamer_info["vod_id"])
+        history_file.write_text(json.dumps(processed), encoding="utf-8")
 
 
 def main():
