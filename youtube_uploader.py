@@ -6,6 +6,7 @@ Uploads video files directly to YouTube with automated metadata, gaming category
 tags, and custom thumbnail support using the official Google YouTube Data API v3.
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -24,31 +25,66 @@ if not CLIENT_SECRETS_FILE.exists() and (BASE_DIR / "clientsecret.json").exists(
 
 
 def get_authenticated_service():
-    """Authenticates using stored token or runs a one-time OAuth browser authorization."""
+    """Authenticates using stored token, environment variables, or runs an interactive browser authorization."""
     creds = None
-    if TOKEN_FILE.exists():
+
+    # 1. Read token from environment variable if provided (e.g. GitHub Actions secret)
+    env_token = os.environ.get("YOUTUBE_TOKEN_JSON") or os.environ.get("YOUTUBE_TOKEN")
+    if env_token and env_token.strip():
+        try:
+            token_data = json.loads(env_token.strip())
+            creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+            print("[+] Loaded YouTube credentials from environment secret.")
+        except Exception as e:
+            print(f"[!] Warning reading token from environment: {e}")
+
+    # 2. Read token from local file
+    if not creds and TOKEN_FILE.exists():
         try:
             creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+            print("[+] Loaded YouTube credentials from local token file.")
         except Exception as e:
-            print(f"[!] Warning reading token: {e}")
+            print(f"[!] Warning reading token file: {e}")
 
+    # 3. Refresh or authenticate
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             print("[*] Refreshing expired YouTube token...")
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+                print("[+] Token refreshed successfully.")
+            except Exception as e:
+                print(f"[!] Failed to refresh token: {e}")
+                return None
         else:
+            # Detect GitHub Actions or headless runner
+            is_headless = bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+            if is_headless:
+                print("[!] Running in GitHub Actions/headless mode without pre-authorized YouTube token.")
+                print("    Skipping YouTube upload to prevent workflow timeout. Video and thumbnails will be saved as GitHub Artifacts.")
+                return None
+
             if not CLIENT_SECRETS_FILE.exists():
                 print(f"[!] Error: {CLIENT_SECRETS_FILE.name} not found in {BASE_DIR}.", file=sys.stderr)
                 print("    Please place your Google Cloud OAuth client_secrets.json file in this directory.", file=sys.stderr)
                 return None
-            flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRETS_FILE), SCOPES)
-            creds = flow.run_local_server(port=0)
 
-        with open(TOKEN_FILE, "w", encoding="utf-8") as token:
-            token.write(creds.to_json())
-            print(f"[+] Saved authorization to {TOKEN_FILE.name}")
+            try:
+                flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRETS_FILE), SCOPES)
+                creds = flow.run_local_server(port=0)
+            except Exception as e:
+                print(f"[!] Interactive authorization flow failed: {e}")
+                return None
 
-    return build("youtube", "v3", credentials=creds)
+        if creds and creds.valid:
+            try:
+                with open(TOKEN_FILE, "w", encoding="utf-8") as token:
+                    token.write(creds.to_json())
+                    print(f"[+] Saved authorization to {TOKEN_FILE.name}")
+            except Exception as e:
+                print(f"[!] Note: Could not write token file: {e}")
+
+    return build("youtube", "v3", credentials=creds) if creds and creds.valid else None
 
 
 def upload_short(video_path: Path, title: str, description: str, tags: list = None,

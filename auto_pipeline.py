@@ -369,6 +369,10 @@ def upload_to_youtube(video_path: Path, thumbnail_path: Path, streamer_name: str
         
         print(f"[*] Posting to YouTube: {title}")
         url = youtube_uploader.upload_short(video_path, title, desc, tags=tags, thumbnail_path=thumbnail_path, privacy="public")
+        if url:
+            print(f"[✓] Published successfully: {url}")
+        else:
+            print(f"[*] Video and thumbnails saved in automated_clips/ for GitHub artifact download.")
         return url
     except Exception as e:
         print(f"[!] YouTube upload step encountered: {e}")

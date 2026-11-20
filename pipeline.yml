@@ -36,15 +36,25 @@ jobs:
             echo "$CLIENT_SECRETS" > client_secrets.json
             echo "[+] client_secrets.json restored"
           else
-            echo "[!] Warning: CLIENT_SECRETS_JSON secret is empty"
+            echo "[!] Note: CLIENT_SECRETS_JSON secret is optional if already authenticated"
           fi
           if [ -n "$YOUTUBE_TOKEN" ]; then
             echo "$YOUTUBE_TOKEN" > youtube_token.json
             echo "[+] youtube_token.json restored"
           else
-            echo "[!] Note: YOUTUBE_TOKEN_JSON secret not set yet"
+            echo "[!] Note: YOUTUBE_TOKEN_JSON secret not set yet; workflow will store generated Shorts in GitHub Artifacts"
           fi
 
       - name: Run Autonomous Clipper
+        env:
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
         run: |
           python auto_pipeline.py --oneshot
+
+      - name: Upload Generated Shorts to GitHub Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gta6-shorts
+          path: automated_clips/
+          if-no-files-found: ignore
